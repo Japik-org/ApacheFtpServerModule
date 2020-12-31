@@ -15,6 +15,10 @@ public class DigestPasswordEncryptor implements PasswordEncryptor {
         md.update(salt.getBytes(StandardCharsets.UTF_8));
     }
 
+    public DigestPasswordEncryptor(String algorithm) throws NoSuchAlgorithmException {
+        md = MessageDigest.getInstance(algorithm);
+    }
+
     @Override
     public String encrypt(String s) {
         byte[] bytes = md.digest(s.getBytes(StandardCharsets.UTF_8));

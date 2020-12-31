@@ -9,21 +9,16 @@ import com.pro100kryto.server.service.IServiceControl;
 import org.apache.ftpserver.ConnectionConfigFactory;
 import org.apache.ftpserver.FtpServer;
 import org.apache.ftpserver.FtpServerFactory;
-import org.apache.ftpserver.command.CommandFactory;
 import org.apache.ftpserver.ftplet.Authority;
 import org.apache.ftpserver.ftplet.Ftplet;
 import org.apache.ftpserver.ftplet.UserManager;
 import org.apache.ftpserver.listener.ListenerFactory;
-import org.apache.ftpserver.message.MessageResourceFactory;
 import org.apache.ftpserver.usermanager.PropertiesUserManagerFactory;
 import org.apache.ftpserver.usermanager.impl.BaseUser;
+import org.apache.ftpserver.usermanager.impl.WritePermission;
 
 import java.io.File;
-import java.security.Permissions;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
+import java.util.*;
 
 public class ApacheFtpServerModule extends Module {
     private FtpServer ftpServer;
@@ -38,17 +33,21 @@ public class ApacheFtpServerModule extends Module {
 
         // settings
 
-        final String address = settings.getOrDefault("ftp-address", "");
-        if (address.equals(""))
-            throw new Exception("ftp-address not specified");
+        final String address = settings.getOrDefault("ftp-address", "localhost");
         final int port = Integer.parseInt(settings.getOrDefault("ftp-port", "21"));
-        final String fileUsersPath = settings.getOrDefault("ftp-users-file",
+
+        final String fileUsersPath = (!settings.getOrDefault("ftp-users-file","").isEmpty() ?
+                settings.get("ftp-users-file") :
                 Server.getInstance().getWorkingPath() + File.separator + "users.properties");
+
         final String encryptAlgorithm = settings.getOrDefault("ftp-pass-encrypt-algorithm", "SHA-256");
-        final String homeDirPath = settings.getOrDefault("ftp-directory", "");
-        if (homeDirPath.equals(""))
-            throw new Exception("ftp-directory not specified");
-        final boolean userAnonymEnabled = settings.getOrDefault("ftp-users-anonymous", "").equals("true");
+        final String encryptSalt = settings.getOrDefault("ftp-pass-encrypt-salt", "");
+
+        final String homeDirPath = settings.getOrDefault("ftp-directory", "/");
+
+        final boolean userAnonymEnabled = settings.getOrDefault("ftp-anonymous-enabled", "").equals("true");
+        final boolean userEnonymWrite = settings.getOrDefault("ftp-anonymous-write","").equals("true");
+
         final int loginFailureDelay = Integer.parseInt(settings.getOrDefault("ftp-login-fail-delay", "500"));
         final int loginMax = Integer.parseInt(settings.getOrDefault("ftp-login-max", "15"));
         final int threadsMax = Integer.parseInt(settings.getOrDefault("ftp-threads-max", "0"));
@@ -69,11 +68,18 @@ public class ApacheFtpServerModule extends Module {
         if (!fileUsers.exists()) fileUsers.createNewFile();
         userManagerFactory.setFile(fileUsers);
 
-        if (encryptAlgorithm.isEmpty() || encryptAlgorithm.equalsIgnoreCase("raw")){
+        // encrypt pass
+
+        if (encryptAlgorithm.isEmpty() || encryptAlgorithm.equalsIgnoreCase("$raw")){
             userManagerFactory.setPasswordEncryptor(new NoPasswordEncryptor());
         } else {
-            final String encryptSalt = settings.getOrDefault("ftp-pass-encrypt-salt", UUID.randomUUID().toString());
-            userManagerFactory.setPasswordEncryptor(new DigestPasswordEncryptor(encryptAlgorithm, encryptSalt));
+            if (encryptSalt.isEmpty()) {
+                userManagerFactory.setPasswordEncryptor(new DigestPasswordEncryptor(encryptAlgorithm));
+            } if (encryptSalt.equals("$random")){
+                userManagerFactory.setPasswordEncryptor(new DigestPasswordEncryptor(encryptAlgorithm, UUID.randomUUID().toString()));
+            } else {
+                userManagerFactory.setPasswordEncryptor(new DigestPasswordEncryptor(encryptAlgorithm, encryptSalt));
+            }
         }
 
         userManager = userManagerFactory.createUserManager();
@@ -110,6 +116,11 @@ public class ApacheFtpServerModule extends Module {
             final BaseUser userAnonym = new BaseUser();
             userAnonym.setName("anonymous");
             userAnonym.setHomeDirectory(new File(homeDirPath).getAbsolutePath());
+            if (userEnonymWrite) {
+                userAnonym.setAuthorities(new ArrayList<Authority>() {{
+                    add(new WritePermission());
+                }});
+            }
             userManager.save(userAnonym);
         }
 
